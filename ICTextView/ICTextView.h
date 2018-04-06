@@ -68,7 +68,9 @@ typedef enum
     ICTextViewSearchDirectionForward,
     
     /// Backward search.
-    ICTextViewSearchDirectionBackward
+    ICTextViewSearchDirectionBackward,
+    
+    ICTextViewSearchDirectionNone
 } ICTextViewSearchDirection;
 
 #pragma mark - Interface
