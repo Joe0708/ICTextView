@@ -265,10 +265,10 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
     // Get match
     if (index == ICSearchIndexAuto)
     {
-        if (searchDirection == ICTextViewSearchDirectionForward)
-            [regex rangeOfNextMatch];
-        else
+        if (searchDirection == ICTextViewSearchDirectionBackward)
             [regex rangeOfPreviousMatch];
+        else
+            [regex rangeOfNextMatch];
     }
     else
     {
