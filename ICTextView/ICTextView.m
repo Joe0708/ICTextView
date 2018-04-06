@@ -48,20 +48,6 @@
 static NSUInteger const ICSearchIndexAuto = NSUIntegerMax;
 static NSTimeInterval const ICMinScrollAutoRefreshDelay = 0.1;
 
-#pragma mark - Globals
-
-// Search results highlighting supported starting from iOS 5.x
-static BOOL highlightingSupported = NO;
-
-// Accounts for textContainerInset on iOS 7+
-static BOOL textContainerInsetSupported = NO;
-
-// Fixes
-static BOOL shouldApplyBecomeFirstResponderFix = NO;
-static BOOL shouldApplyCaretFix = NO;
-static BOOL shouldApplyCharacterRangeAtPointFix = NO;
-static BOOL shouldApplyTextContainerFix = NO;
-
 #pragma mark - Helper
 
 NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
@@ -182,21 +168,6 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
 
 #pragma mark - Class methods
 
-+ (void)initialize
-{
-    if (self == [ICTextView class])
-    {
-        highlightingSupported = [self conformsToProtocol:@protocol(UITextInput)];
-        
-        // Using NSSelectorFromString() instead of @selector() to suppress unneccessary warnings on older SDKs
-        textContainerInsetSupported = [self instancesRespondToSelector:NSSelectorFromString(@"textContainerInset")];
-        
-        shouldApplyBecomeFirstResponderFix = NSFoundationVersionNumber >= NSFoundationVersionNumber_iOS_7_0 && NSFoundationVersionNumber < NSFoundationVersionNumber_iOS_9_0;
-        shouldApplyCaretFix = NSFoundationVersionNumber >= NSFoundationVersionNumber_iOS_7_0 && NSFoundationVersionNumber < NSFoundationVersionNumber_iOS_9_0;
-        shouldApplyCharacterRangeAtPointFix = NSFoundationVersionNumber >= NSFoundationVersionNumber_iOS_7_0 && NSFoundationVersionNumber < NSFoundationVersionNumber_iOS_8_0;
-        shouldApplyTextContainerFix = NSFoundationVersionNumber >= NSFoundationVersionNumber_iOS_7_0 && NSFoundationVersionNumber < NSFoundationVersionNumber_iOS_9_0;
-    }
-}
 
 #pragma mark - Output
 
@@ -228,11 +199,8 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
 
 - (void)resetSearch
 {
-    if (highlightingSupported)
-    {
-        [self initializeHighlights];
-        self.autoRefreshTimer = nil;
-    }
+    [self initializeHighlights];
+    self.autoRefreshTimer = nil;
     
     self.cachedRange = ICRangeZero;
     self.regex = nil;
@@ -295,7 +263,7 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
         self.searchVisibleRange = NO;
         
         // Add highlights
-        if (highlightingSupported && self.highlightSearchResults)
+        if (self.highlightSearchResults)
             [self highlightOccurrencesInMaskedVisibleRange];
         
         // Scroll
@@ -380,7 +348,6 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
     {
         case ICTextViewScrollPositionTop:
             toleranceArea.size.height = rect.size.height * 1.5f;
-            y -= 100;
             break;
             
         case ICTextViewScrollPositionMiddle:
@@ -657,7 +624,7 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
     }
     
     // Reset highlights
-    if (highlightingSupported && self.highlightSearchResults)
+    if (self.highlightSearchResults)
     {
         [self initializePrimaryHighlights];
         if (allocateNewRegex)
@@ -730,9 +697,14 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
 // Scrolls to y coordinate without breaking the frame and (eventually) insets
 - (void)scrollToY:(CGFloat)y animated:(BOOL)animated consideringInsets:(BOOL)considerInsets
 {
-    CGFloat min = 0.0;
+    CGFloat min = 0;
     CGFloat max = MAX(self.contentSize.height - self.bounds.size.height, 0.0f);
     
+    if (@available(iOS 11, *)) {
+        min -= self.safeAreaInsets.top;
+        max += self.safeAreaInsets.bottom;
+        y -= self.safeAreaInsets.top;
+    }
     if (considerInsets)
     {
         UIEdgeInsets contentInset = [self totalContentInset];
@@ -749,7 +721,6 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
         contentOffset.y = min;
     else
         contentOffset.y = y;
-    
     [self setContentOffset:contentOffset animated:animated];
 }
 
@@ -775,13 +746,6 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
 {
     if (self.searching)
         [self resetSearch];
-    
-    if (shouldApplyCaretFix)
-    {
-        UITextRange *selectedTextRange = self.selectedTextRange;
-        if (selectedTextRange.empty)
-            [self scrollToCaretPosition:selectedTextRange.end];
-    }
 }
 
 // Accounts for both contentInset and textContainerInset
@@ -789,15 +753,12 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
 {
     UIEdgeInsets contentInset = self.contentInset;
     
-    if (textContainerInsetSupported)
-    {
-        UIEdgeInsets textContainerInset = self.textContainerInset;
-        
-        contentInset.top += textContainerInset.top;
-        contentInset.bottom += textContainerInset.bottom;
-        contentInset.left += textContainerInset.left;
-        contentInset.right += textContainerInset.right;
-    }
+    UIEdgeInsets textContainerInset = self.textContainerInset;
+    
+    contentInset.top += textContainerInset.top;
+    contentInset.bottom += textContainerInset.bottom;
+    contentInset.left += textContainerInset.left;
+    contentInset.right += textContainerInset.right;
     
     return contentInset;
 }
@@ -819,17 +780,14 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
 
 - (id)initWithCoder:(NSCoder *)aDecoder
 {
-    if ((self = [super initWithCoder:aDecoder]) && highlightingSupported)
+    if ((self = [super initWithCoder:aDecoder]))
         [self initialize];
     return self;
 }
 
 - (id)initWithFrame:(CGRect)frame
 {
-    if (shouldApplyTextContainerFix)
-        return [self initWithFrame:frame textContainer:nil];
-    
-    if ((self = [super initWithFrame:frame]) && highlightingSupported)
+    if ((self = [super initWithFrame:frame]))
         [self initialize];
     
     return self;
@@ -839,18 +797,7 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
 {
     NSTextContainer *localTextContainer = textContainer;
     
-    if (!localTextContainer && shouldApplyTextContainerFix)
-    {
-        NSTextStorage *textStorage = [[NSTextStorage alloc] init];
-        NSLayoutManager *layoutManager = [[NSLayoutManager alloc] init];
-        [textStorage addLayoutManager:layoutManager];
-        localTextContainer = [[NSTextContainer alloc] initWithSize:CGSizeMake(frame.size.width, CGFLOAT_MAX)];
-        localTextContainer.heightTracksTextView = YES;
-        localTextContainer.widthTracksTextView = YES;
-        [layoutManager addTextContainer:localTextContainer];
-    }
-    
-    if ((self = [super initWithFrame:frame textContainer:textContainer]) && highlightingSupported)
+    if ((self = [super initWithFrame:frame textContainer:textContainer]))
         [self initialize];
     
     return self;
@@ -860,7 +807,7 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
 {
     [super setContentOffset:contentOffset];
     
-    if (highlightingSupported && self.highlightSearchResults)
+    if (self.highlightSearchResults)
     {
         self.performedNewScroll = YES;
         
@@ -889,7 +836,7 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
 
 - (void)setFrame:(CGRect)frame
 {
-    if (highlightingSupported && self.highlightsByRange.count)
+    if (self.highlightsByRange.count)
     {
         [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(initializeHighlights) object:nil];
         [self performSelector:@selector(initializeHighlights) withObject:nil afterDelay:0.1];
@@ -897,23 +844,6 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
     [super setFrame:frame];
 }
 
-#pragma mark - Fixes
-
-- (void)applySelectionFix
-{
-    if ((shouldApplyBecomeFirstResponderFix || shouldApplyCharacterRangeAtPointFix) && !self.appliedSelectionFix && self.text.length > 1)
-    {
-        [self select:self];
-        [self setSelectedTextRange:nil];
-        self.appliedSelectionFix = YES;
-    }
-}
-
-- (void)awakeFromNib
-{
-    [super awakeFromNib];
-    [self applySelectionFix];
-}
 
 - (void)scrollToCaretPosition:(UITextPosition *)position
 {
@@ -922,104 +852,5 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
     [self scrollRectToVisible:[self caretRectForPosition:position] animated:NO consideringInsets:YES];
     self.scrollPosition = oldPosition;
 }
-
-- (void)setAttributedText:(NSAttributedString *)attributedText
-{
-    [super setAttributedText:attributedText];
-    [self applySelectionFix];
-}
-
-- (void)setSelectedTextRange:(UITextRange *)selectedTextRange
-{
-    [super setSelectedTextRange:selectedTextRange];
-    
-    if (shouldApplyCaretFix && selectedTextRange.empty)
-        [self scrollToCaretPosition:selectedTextRange.end];
-}
-
-- (void)setText:(NSString *)text
-{
-    [super setText:text];
-    [self applySelectionFix];
-}
-
-#pragma mark - Deprecated
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-implementations"
-
-- (BOOL)scrollToMatch:(NSString *)pattern searchOptions:(NSRegularExpressionOptions)options
-{
-    self.searchOptions = options;
-    return [self scrollToMatch:pattern];
-}
-
-- (BOOL)scrollToMatch:(NSString *)pattern searchOptions:(NSRegularExpressionOptions)options range:(NSRange)range
-{
-    self.searchOptions = options;
-    self.searchRange = range;
-    return [self scrollToMatch:pattern];
-}
-
-- (BOOL)scrollToMatch:(NSString *)pattern searchOptions:(NSRegularExpressionOptions)options animated:(BOOL)animated atScrollPosition:(ICTextViewScrollPosition)scrollPosition
-{
-    self.animatedSearch = animated;
-    self.scrollPosition = scrollPosition;
-    self.searchOptions = options;
-    return [self scrollToMatch:pattern];
-}
-
-- (BOOL)scrollToMatch:(NSString *)pattern searchOptions:(NSRegularExpressionOptions)options range:(NSRange)range animated:(BOOL)animated atScrollPosition:(ICTextViewScrollPosition)scrollPosition
-{
-    self.animatedSearch = animated;
-    self.scrollPosition = scrollPosition;
-    self.searchOptions = options;
-    self.searchRange = range;
-    return [self scrollToMatch:pattern];
-}
-
-- (BOOL)scrollToString:(NSString *)stringToFind searchOptions:(NSRegularExpressionOptions)options
-{
-    self.searchOptions = options;
-    return [self scrollToString:stringToFind];
-}
-
-- (BOOL)scrollToString:(NSString *)stringToFind searchOptions:(NSRegularExpressionOptions)options range:(NSRange)range
-{
-    self.searchOptions = options;
-    self.searchRange = range;
-    return [self scrollToString:stringToFind];
-}
-
-- (BOOL)scrollToString:(NSString *)stringToFind searchOptions:(NSRegularExpressionOptions)options animated:(BOOL)animated atScrollPosition:(ICTextViewScrollPosition)scrollPosition
-{
-    self.animatedSearch = animated;
-    self.scrollPosition = scrollPosition;
-    self.searchOptions = options;
-    return [self scrollToString:stringToFind];
-}
-
-- (BOOL)scrollToString:(NSString *)stringToFind searchOptions:(NSRegularExpressionOptions)options range:(NSRange)range animated:(BOOL)animated atScrollPosition:(ICTextViewScrollPosition)scrollPosition
-{
-    self.animatedSearch = animated;
-    self.scrollPosition = scrollPosition;
-    self.searchOptions = options;
-    self.searchRange = range;
-    return [self scrollToString:stringToFind];
-}
-
-- (void)scrollRangeToVisible:(NSRange)range consideringInsets:(BOOL)considerInsets animated:(BOOL)animated atScrollPosition:(ICTextViewScrollPosition)scrollPosition
-{
-    self.scrollPosition = scrollPosition;
-    [self scrollRangeToVisible:range consideringInsets:considerInsets animated:animated];
-}
-
-- (void)scrollRectToVisible:(CGRect)rect animated:(BOOL)animated consideringInsets:(BOOL)considerInsets atScrollPosition:(ICTextViewScrollPosition)scrollPosition
-{
-    self.scrollPosition = scrollPosition;
-    [self scrollRectToVisible:rect animated:animated consideringInsets:considerInsets];
-}
-
-#pragma clang diagnostic pop
 
 @end
