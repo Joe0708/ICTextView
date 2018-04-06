@@ -299,7 +299,9 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
             [self highlightOccurrencesInMaskedVisibleRange];
         
         // Scroll
-        [self scrollRangeToVisible:matchRange consideringInsets:YES animated:self.animatedSearch];
+        if (searchDirection != ICTextViewSearchDirectionNone) {
+            [self scrollRangeToVisible:matchRange consideringInsets:YES animated:self.animatedSearch];
+        }
     }
     
     return found;
@@ -355,19 +357,8 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
 
 - (void)scrollRangeToVisible:(NSRange)range consideringInsets:(BOOL)considerInsets animated:(BOOL)animated
 {
-    if (NSFoundationVersionNumber < NSFoundationVersionNumber_iOS_5_0)
-    {
-        // considerInsets, animated and scrollPosition are ignored in iOS 4.x
-        // as UITextView doesn't conform to the UITextInput protocol
-        [self scrollRangeToVisible:range];
-        return;
-    }
-    
     // Calculate rect for range
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 70000
-    if (NSFoundationVersionNumber >= NSFoundationVersionNumber_iOS_7_0)
-        [self.layoutManager ensureLayoutForTextContainer:self.textContainer];
-#endif
+    [self.layoutManager ensureLayoutForTextContainer:self.textContainer];
     
     UITextPosition *startPosition = [self positionFromPosition:self.beginningOfDocument offset:(NSInteger)range.location];
     UITextPosition *endPosition = [self positionFromPosition:startPosition offset:(NSInteger)range.length];
@@ -389,6 +380,7 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
     {
         case ICTextViewScrollPositionTop:
             toleranceArea.size.height = rect.size.height * 1.5f;
+            y -= 100;
             break;
             
         case ICTextViewScrollPositionMiddle:
@@ -465,65 +457,31 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
 - (NSMutableArray *)addHighlightAtTextRange:(UITextRange *)textRange
 {
     NSMutableArray *highlightsForRange = [[NSMutableArray alloc] init];
+    CGRect previousRect = CGRectZero;
+    NSArray *highlightRects = [self selectionRectsForRange:textRange];
     
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 60000
-    if (NSFoundationVersionNumber >= NSFoundationVersionNumber_iOS_6_0)
+    // Merge adjacent rects
+    for (UITextSelectionRect *selectionRect in highlightRects)
     {
-        // iOS 6.x+ implementation
-        CGRect previousRect = CGRectZero;
-        NSArray *highlightRects = [self selectionRectsForRange:textRange];
+        CGRect currentRect = selectionRect.rect;
         
-        // Merge adjacent rects
-        for (UITextSelectionRect *selectionRect in highlightRects)
+        if (ICCGFloatEqualOnScreen(currentRect.origin.y, previousRect.origin.y) &&
+            ICCGFloatEqualOnScreen(currentRect.origin.x, CGRectGetMaxX(previousRect)) &&
+            ICCGFloatEqualOnScreen(currentRect.size.height, previousRect.size.height))
         {
-            CGRect currentRect = selectionRect.rect;
-            
-            if (ICCGFloatEqualOnScreen(currentRect.origin.y, previousRect.origin.y) &&
-                ICCGFloatEqualOnScreen(currentRect.origin.x, CGRectGetMaxX(previousRect)) &&
-                ICCGFloatEqualOnScreen(currentRect.size.height, previousRect.size.height))
-            {
-                // Adjacent, add to previous rect
-                previousRect = CGRectMake(previousRect.origin.x, previousRect.origin.y, previousRect.size.width + currentRect.size.width, previousRect.size.height);
-            }
-            else
-            {
-                // Not adjacent, add previous rect to highlights array
-                [highlightsForRange addObject:[self addHighlightAtRect:previousRect]];
-                previousRect = currentRect;
-            }
+            // Adjacent, add to previous rect
+            previousRect = CGRectMake(previousRect.origin.x, previousRect.origin.y, previousRect.size.width + currentRect.size.width, previousRect.size.height);
         }
-        
-        // Add last highlight
-        [highlightsForRange addObject:[self addHighlightAtRect:previousRect]];
-    }
-    else
-#endif
-    {
-        // iOS 5.x implementation (a bit slower)
-        CGRect previousRect = CGRectZero;
-        UITextPosition *start = textRange.start;
-        UITextPosition *end = textRange.end;
-        id <UITextInputTokenizer> tokenizer = [self tokenizer];
-        BOOL hasMoreLines;
-        do {
-            UITextPosition *lineEnd = [tokenizer positionFromPosition:start toBoundary:UITextGranularityLine inDirection:UITextStorageDirectionForward];
-            
-            // Check if string is on multiple lines
-            if ([self offsetFromPosition:lineEnd toPosition:end] <= 0)
-            {
-                hasMoreLines = NO;
-                textRange = [self textRangeFromPosition:start toPosition:end];
-            }
-            else
-            {
-                hasMoreLines = YES;
-                textRange = [self textRangeFromPosition:start toPosition:lineEnd];
-                start = lineEnd;
-            }
-            previousRect = [self firstRectForRange:textRange];
+        else
+        {
+            // Not adjacent, add previous rect to highlights array
             [highlightsForRange addObject:[self addHighlightAtRect:previousRect]];
-        } while (hasMoreLines);
+            previousRect = currentRect;
+        }
     }
+    
+    // Add last highlight
+    [highlightsForRange addObject:[self addHighlightAtRect:previousRect]];
     return highlightsForRange;
 }
 
@@ -818,14 +776,12 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
     if (self.searching)
         [self resetSearch];
     
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 70000
     if (shouldApplyCaretFix)
     {
         UITextRange *selectedTextRange = self.selectedTextRange;
         if (selectedTextRange.empty)
             [self scrollToCaretPosition:selectedTextRange.end];
     }
-#endif
 }
 
 // Accounts for both contentInset and textContainerInset
@@ -833,7 +789,6 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
 {
     UIEdgeInsets contentInset = self.contentInset;
     
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 70000
     if (textContainerInsetSupported)
     {
         UIEdgeInsets textContainerInset = self.textContainerInset;
@@ -843,7 +798,6 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
         contentInset.left += textContainerInset.left;
         contentInset.right += textContainerInset.right;
     }
-#endif
     
     return contentInset;
 }
@@ -872,10 +826,8 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
 
 - (id)initWithFrame:(CGRect)frame
 {
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 70000
     if (shouldApplyTextContainerFix)
         return [self initWithFrame:frame textContainer:nil];
-#endif
     
     if ((self = [super initWithFrame:frame]) && highlightingSupported)
         [self initialize];
@@ -883,7 +835,6 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
     return self;
 }
 
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 70000
 - (id)initWithFrame:(CGRect)frame textContainer:(NSTextContainer *)textContainer
 {
     NSTextContainer *localTextContainer = textContainer;
@@ -904,7 +855,6 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
     
     return self;
 }
-#endif
 
 - (void)setContentOffset:(CGPoint)contentOffset
 {
@@ -949,8 +899,6 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
 
 #pragma mark - Fixes
 
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 70000
-
 - (void)applySelectionFix
 {
     if ((shouldApplyBecomeFirstResponderFix || shouldApplyCharacterRangeAtPointFix) && !self.appliedSelectionFix && self.text.length > 1)
@@ -994,7 +942,6 @@ NS_INLINE BOOL ICCGFloatEqualOnScreen(CGFloat f1, CGFloat f2)
     [super setText:text];
     [self applySelectionFix];
 }
-#endif
 
 #pragma mark - Deprecated
 
