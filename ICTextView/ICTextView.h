@@ -255,4 +255,5 @@ typedef enum
  */
 - (CGRect)visibleRectConsideringInsets:(BOOL)considerInsets;
 
+- (NSMutableArray *)addHighlightAtTextRange:(UITextRange *)textRange;
 @end
